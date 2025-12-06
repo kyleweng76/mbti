@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { BookOpen, Brain, Edit2, Save, X, RotateCcw, Menu, Share, ChevronRight, ClipboardList, CheckCircle, ArrowRight, RefreshCw, User, Zap, Users, ChevronDown, ChevronUp, Search } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { BookOpen, Brain, Edit2, Save, X, RotateCcw, Menu, Share, ChevronRight, ClipboardList, CheckCircle, ArrowRight, RefreshCw, User, Zap, Users, ChevronDown, ChevronUp, Search, MoreVertical, PlusSquare, MessageSquare, Sparkles, Send, Loader2 } from 'lucide-react';
 
 // --- 硬編碼結構資料 ---
 
@@ -15,13 +15,12 @@ const TYPE_STACKS = {
   'ENFJ': ['fe', 'ni', 'se', 'ti'], 'ENTJ': ['te', 'ni', 'se', 'fi']
 };
 
-// 色彩系統 (對應 Logo B 的四個區塊)
+// 色彩系統
 const THEME_COLORS = {
   ei: { main: 'text-indigo-600', bg: 'bg-indigo-50', border: 'border-indigo-100', icon: 'bg-indigo-100 text-indigo-600', hover: 'hover:bg-indigo-50', ring: 'focus:ring-indigo-500', btn: 'bg-indigo-600 hover:bg-indigo-700' },
   sn: { main: 'text-purple-600', bg: 'bg-purple-50', border: 'border-purple-100', icon: 'bg-purple-100 text-purple-600', hover: 'hover:bg-purple-50', ring: 'focus:ring-purple-500', btn: 'bg-purple-600 hover:bg-purple-700' },
   tf: { main: 'text-pink-600', bg: 'bg-pink-50', border: 'border-pink-100', icon: 'bg-pink-100 text-pink-600', hover: 'hover:bg-pink-50', ring: 'focus:ring-pink-500', btn: 'bg-pink-600 hover:bg-pink-700' },
   jp: { main: 'text-amber-600', bg: 'bg-amber-50', border: 'border-amber-100', icon: 'bg-amber-100 text-amber-600', hover: 'hover:bg-amber-50', ring: 'focus:ring-amber-500', btn: 'bg-amber-600 hover:bg-amber-700' },
-  // 通用
   default: { main: 'text-gray-600', bg: 'bg-gray-50', border: 'border-gray-100', icon: 'bg-gray-100 text-gray-600', hover: 'hover:bg-gray-50', ring: 'focus:ring-gray-500', btn: 'bg-gray-800 hover:bg-gray-900' }
 };
 
@@ -222,7 +221,7 @@ const AppLogo = () => (
 );
 
 const App = () => {
-  const [activeTab, setActiveTab] = useState('letters'); // letters | functions | types | quiz
+  const [activeTab, setActiveTab] = useState('letters'); // letters | functions | types | quiz | ai-chat
   const [data, setData] = useState(DEFAULT_DATA);
   const [expandedType, setExpandedType] = useState(null); 
   const [editingItem, setEditingItem] = useState(null); 
@@ -232,13 +231,88 @@ const App = () => {
   const [currentQuestion, setCurrentQuestion] = useState(0);
   const [quizAnswers, setQuizAnswers] = useState({ EI: '', SN: '', TF: '', JP: '' });
 
+  // AI Chat State
+  const [chatHistory, setChatHistory] = useState([{ role: 'model', text: '你好！我是你的 AI MBTI 顧問。你可以問我任何關於人格類型、功能分析、或人際關係的問題！✨' }]);
+  const [chatInput, setChatInput] = useState('');
+  const [isChatLoading, setIsChatLoading] = useState(false);
+  const chatEndRef = useRef(null);
+
+  const apiKey = "AIzaSyAdzY70jK6g5S15cFa7TxWjEeW9_GEyFaI"; // Gemini API Key
+
+  const scrollToBottom = () => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    if (activeTab === 'ai-chat') {
+      scrollToBottom();
+    }
+  }, [chatHistory, activeTab]);
+
+  // Gemini API Call with Exponential Backoff
+  const callGeminiAPI = async (prompt) => {
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+    const payload = {
+      contents: [{ parts: [{ text: prompt }] }],
+      systemInstruction: { parts: [{ text: "你是一位精通 MBTI (Myers-Briggs Type Indicator) 與榮格八維認知功能 (Cognitive Functions) 的專家顧問。請用繁體中文回答使用者的問題。你的分析應該深入、客觀，並嘗試用功能運作 (如 Ni, Te 等) 來解釋現象。回答要具備同理心，適合用於個人成長或人際關係諮詢。請避免過於武斷的刻板印象，強調每個人的獨特性。" }] }
+    };
+
+    let retries = 0;
+    const maxRetries = 5;
+    const delays = [1000, 2000, 4000, 8000, 16000];
+
+    while (retries <= maxRetries) {
+      try {
+        const response = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+
+        if (!response.ok) {
+           if (response.status === 429) {
+             throw new Error('Too Many Requests');
+           }
+           throw new Error(`API Error: ${response.status}`);
+        }
+
+        const data = await response.json();
+        return data.candidates?.[0]?.content?.parts?.[0]?.text || "抱歉，我現在無法回答，請稍後再試。";
+      } catch (error) {
+        if (retries === maxRetries) {
+          return "連線發生錯誤，請檢查網路或稍後再試。";
+        }
+        await new Promise(resolve => setTimeout(resolve, delays[retries]));
+        retries++;
+      }
+    }
+  };
+
+  const handleSendChat = async () => {
+    if (!chatInput.trim() || isChatLoading) return;
+    
+    const userMsg = chatInput;
+    setChatInput('');
+    setChatHistory(prev => [...prev, { role: 'user', text: userMsg }]);
+    setIsChatLoading(true);
+
+    try {
+      const reply = await callGeminiAPI(userMsg);
+      setChatHistory(prev => [...prev, { role: 'model', text: reply }]);
+    } catch (e) {
+      setChatHistory(prev => [...prev, { role: 'model', text: "發生未知錯誤，請重試。" }]);
+    } finally {
+      setIsChatLoading(false);
+    }
+  };
+
   // 初始化
   useEffect(() => {
+    // 1. 讀取資料
     const savedData = localStorage.getItem('mbti_app_data');
     if (savedData) {
       try {
         const parsed = JSON.parse(savedData);
-        // 合併新欄位 (colorKey 等)
         setData({ 
           ...DEFAULT_DATA, 
           ...parsed,
@@ -308,9 +382,9 @@ const App = () => {
   const getFuncColor = (type) => {
     switch(type) {
       case 'Intuition': return 'text-purple-600 bg-purple-50 border-purple-100';
-      case 'Sensing': return 'text-amber-600 bg-amber-50 border-amber-100'; // 調整: S 維持琥珀色區隔，雖 SN 主色是紫
-      case 'Thinking': return 'text-indigo-600 bg-indigo-50 border-indigo-100'; // 調整: T 改為藍色系
-      case 'Feeling': return 'text-pink-600 bg-pink-50 border-pink-100'; // 調整: F 改為粉色系
+      case 'Sensing': return 'text-amber-600 bg-amber-50 border-amber-100'; 
+      case 'Thinking': return 'text-indigo-600 bg-indigo-50 border-indigo-100'; 
+      case 'Feeling': return 'text-pink-600 bg-pink-50 border-pink-100'; 
       default: return 'text-gray-600 bg-gray-50';
     }
   };
@@ -348,8 +422,8 @@ const App = () => {
       {/* Main Content */}
       <main className="max-w-3xl mx-auto p-4 md:p-8 animate-in fade-in duration-500">
         
-        {/* Welcome Card (Non-Quiz) */}
-        {activeTab !== 'quiz' && (
+        {/* Welcome Card (Non-Quiz & Non-Chat) */}
+        {activeTab !== 'quiz' && activeTab !== 'ai-chat' && (
           <div className="mb-6 p-4 bg-gradient-to-br from-indigo-600 via-purple-600 to-pink-500 rounded-2xl text-white shadow-lg shadow-indigo-200">
             <h2 className="text-lg font-bold mb-1">打造你的知識體系</h2>
             <p className="text-indigo-100 text-sm opacity-90">
@@ -360,13 +434,14 @@ const App = () => {
 
         {/* Desktop Tabs */}
         <div className="hidden md:flex gap-4 mb-8 border-b border-gray-200 overflow-x-auto">
-          {['letters', 'functions', 'types', 'quiz'].map(tab => (
+          {['letters', 'functions', 'types', 'quiz', 'ai-chat'].map(tab => (
             <button 
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`pb-3 px-4 font-medium transition-all whitespace-nowrap capitalize ${activeTab === tab ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
+              className={`pb-3 px-4 font-medium transition-all whitespace-nowrap capitalize flex items-center gap-2 ${activeTab === tab ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-gray-500 hover:text-gray-700'}`}
             >
-              {{letters: '四個維度', functions: '心智功能', types: '16型人格', quiz: '快速評量'}[tab]}
+              {tab === 'ai-chat' && <Sparkles size={16} />}
+              {{letters: '四個維度', functions: '心智功能', types: '16型人格', quiz: '快速評量', 'ai-chat': 'AI 顧問'}[tab]}
             </button>
           ))}
         </div>
@@ -601,20 +676,87 @@ const App = () => {
               )}
             </div>
           )}
+
+          {/* --- AI CHAT --- */}
+          {activeTab === 'ai-chat' && (
+            <div className="bg-white rounded-3xl shadow-lg border border-gray-100 overflow-hidden h-[600px] max-h-[80vh] flex flex-col relative">
+              <div className="bg-gradient-to-r from-indigo-600 to-purple-600 p-4 flex items-center gap-3 text-white">
+                <div className="bg-white/20 p-2 rounded-lg">
+                  <Sparkles size={20} />
+                </div>
+                <div>
+                  <h3 className="font-bold">AI MBTI 顧問</h3>
+                  <p className="text-xs text-indigo-100">由 Gemini 提供即時分析 ✨</p>
+                </div>
+              </div>
+
+              {/* Chat Messages */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-slate-50">
+                {chatHistory.map((msg, idx) => (
+                  <div key={idx} className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                    <div className={`max-w-[85%] p-3 rounded-2xl text-sm leading-relaxed shadow-sm ${
+                      msg.role === 'user' 
+                        ? 'bg-indigo-600 text-white rounded-br-none' 
+                        : 'bg-white text-gray-800 border border-gray-200 rounded-bl-none'
+                    }`}>
+                      {msg.text}
+                    </div>
+                  </div>
+                ))}
+                {isChatLoading && (
+                  <div className="flex justify-start">
+                    <div className="bg-white p-3 rounded-2xl rounded-bl-none border border-gray-200 shadow-sm flex items-center gap-2 text-sm text-gray-500">
+                      <Loader2 size={16} className="animate-spin text-indigo-600" />
+                      分析中...
+                    </div>
+                  </div>
+                )}
+                <div ref={chatEndRef} />
+              </div>
+
+              {/* Chat Input */}
+              <div className="p-4 bg-white border-t border-gray-100">
+                <div className="relative flex items-center gap-2">
+                  <input 
+                    type="text" 
+                    value={chatInput}
+                    onChange={(e) => setChatInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && !e.shiftKey && handleSendChat()}
+                    placeholder="問問看：我是 INFP，適合什麼工作？"
+                    className="flex-1 bg-gray-50 border border-gray-200 rounded-xl px-4 py-3 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:bg-white transition-all"
+                    disabled={isChatLoading}
+                  />
+                  <button 
+                    onClick={handleSendChat}
+                    disabled={!chatInput.trim() || isChatLoading}
+                    className="bg-indigo-600 text-white p-3 rounded-xl hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-md shadow-indigo-200"
+                  >
+                    <Send size={18} />
+                  </button>
+                </div>
+                <div className="text-[10px] text-center text-gray-400 mt-2">
+                  AI 生成內容可能會有誤差，請作為參考用途。
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </main>
 
       {/* Mobile Nav */}
       <nav className="md:hidden fixed bottom-0 w-full bg-white border-t border-gray-200 flex justify-around py-2 z-10 pb-safe">
-        {['letters', 'functions', 'types', 'quiz'].map(tab => (
+        {['letters', 'functions', 'types', 'quiz', 'ai-chat'].map(tab => (
           <button key={tab} onClick={() => setActiveTab(tab)} className={`flex flex-col items-center p-2 w-full transition-colors ${activeTab === tab ? 'text-indigo-600' : 'text-gray-400'}`}>
             {{
               letters: <BookOpen size={24} strokeWidth={activeTab === tab ? 2.5 : 2} />,
               functions: <Brain size={24} strokeWidth={activeTab === tab ? 2.5 : 2} />,
               types: <Users size={24} strokeWidth={activeTab === tab ? 2.5 : 2} />,
-              quiz: <ClipboardList size={24} strokeWidth={activeTab === tab ? 2.5 : 2} />
+              quiz: <ClipboardList size={24} strokeWidth={activeTab === tab ? 2.5 : 2} />,
+              'ai-chat': <Sparkles size={24} strokeWidth={activeTab === tab ? 2.5 : 2} />
             }[tab]}
-            <span className="text-[10px] mt-1 font-medium">{{letters:'四個維度', functions:'心智功能', types:'16型人格', quiz:'快速評量'}[tab]}</span>
+            <span className="text-[10px] mt-1 font-medium">
+              {{letters:'四個維度', functions:'心智功能', types:'16型人格', quiz:'快速評量', 'ai-chat': 'AI 顧問'}[tab]}
+            </span>
           </button>
         ))}
       </nav>
