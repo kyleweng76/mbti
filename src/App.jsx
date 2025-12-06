@@ -410,9 +410,12 @@ const App = () => {
       <header className="bg-white shadow-sm sticky top-0 z-20 px-4 py-3 flex justify-between items-center border-b border-gray-100">
         <div className="flex items-center gap-3">
           <AppLogo />
-          <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500">
-            MBTI 隨身庫
-          </h1>
+          <div className="flex flex-col">
+            <h1 className="text-xl font-bold bg-clip-text text-transparent bg-gradient-to-r from-indigo-600 via-purple-600 to-amber-500">
+              MBTI 隨身庫
+            </h1>
+            <span className="text-[10px] text-gray-400 font-medium">v2.0 (AI)</span>
+          </div>
         </div>
         <button onClick={resetData} className="p-2 text-gray-400 hover:text-red-500 transition-colors">
           <RotateCcw size={20} />
